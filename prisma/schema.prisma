@@ -1,0 +1,155 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
+// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+
+generator client {
+  provider = "prisma-client-js"
+  output   = "../generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+// ======================
+// 1. Users / Students
+// ======================
+model User {
+  id             Int       @id @default(autoincrement())
+  email          String    @unique
+  name           String?
+  dob            DateTime?
+  gender         String?
+  location       String?
+  educationLevel String?
+  interests      String[]  // array of tags
+  skills         String[]  // array of skills
+
+  assessments    Assessment[]
+  recommendations Recommendation[]
+}
+
+// ======================
+// 2. Assessments
+// ======================
+model Assessment {
+  id          Int      @id @default(autoincrement())
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId      Int
+  testType    String?
+  score       Float?
+  strengths   String[]
+  weaknesses  String[]
+  createdAt   DateTime @default(now())
+}
+
+// ======================
+// 3. Careers
+// ======================
+model Career {
+  id             Int      @id @default(autoincrement())
+  careerName     String   @unique
+  description    String?
+  requiredSkills String[]
+  requiredStream String?
+  futureScope    String?
+
+  courses         Course[]
+  careerSkills    CareerSkill[]
+  recommendations Recommendation[]
+}
+
+// ======================
+// 4. Courses
+// ======================
+model Course {
+  id          Int      @id @default(autoincrement())
+  courseName  String   @unique
+  stream      String?
+  duration    String?
+  eligibility String?
+
+  career    Career?   @relation(fields: [careerId], references: [id])
+  careerId  Int?
+
+  collegeCourses CollegeCourse[]
+  courseSkills   CourseSkill[]
+  recommendations Recommendation[]
+}
+
+// ======================
+// 5. Colleges
+// ======================
+model College {
+  id             Int             @id @default(autoincrement())
+  collegeName    String
+  location       String?
+  affiliation    String?
+
+  collegeCourses CollegeCourse[]
+  recommendations Recommendation[]
+}
+
+// ======================
+// 6. College-Course (M2M)
+// ======================
+model CollegeCourse {
+  id        Int     @id @default(autoincrement())
+  college   College @relation(fields: [collegeId], references: [id], onDelete: Cascade)
+  collegeId Int
+  course    Course  @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  courseId  Int
+
+  @@unique([collegeId, courseId])
+}
+
+// ======================
+// 7. Skills (Optional normalization)
+// ======================
+model Skill {
+  id           Int           @id @default(autoincrement())
+  skillName    String        @unique
+
+  careerSkills CareerSkill[]
+  courseSkills CourseSkill[]
+}
+
+model CareerSkill {
+  id       Int    @id @default(autoincrement())
+  career   Career @relation(fields: [careerId], references: [id], onDelete: Cascade)
+  careerId Int
+  skill    Skill  @relation(fields: [skillId], references: [id], onDelete: Cascade)
+  skillId  Int
+
+  @@unique([careerId, skillId])
+}
+
+model CourseSkill {
+  id       Int    @id @default(autoincrement())
+  course   Course @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  courseId Int
+  skill    Skill  @relation(fields: [skillId], references: [id], onDelete: Cascade)
+  skillId  Int
+
+  @@unique([courseId, skillId])
+}
+
+// ======================
+// 8. Recommendations
+// ======================
+model Recommendation {
+  id        Int      @id @default(autoincrement())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId    Int
+  career    Career?  @relation(fields: [careerId], references: [id])
+  careerId  Int?
+  course    Course?  @relation(fields: [courseId], references: [id])
+  courseId  Int?
+  college   College? @relation(fields: [collegeId], references: [id])
+  collegeId Int?
+
+  score       Float?
+  recommendedAt DateTime @default(now())
+}
