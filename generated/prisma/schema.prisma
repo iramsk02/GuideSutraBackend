@@ -1,0 +1,121 @@
+generator client {
+  provider = "prisma-client-js"
+  output   = "../generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id              Int              @id @default(autoincrement())
+  email           String           @unique
+  name            String?
+  dob             DateTime?
+  educationLevel  String?
+  gender          String?
+  interests       String[]
+  location        String?
+  skills          String[]
+  assessments     Assessment[]
+  recommendations Recommendation[]
+}
+
+model Assessment {
+  id         Int      @id @default(autoincrement())
+  userId     Int
+  testType   String?
+  score      Float?
+  stream     String?
+  strengths  String[]
+  weaknesses String[]
+  createdAt  DateTime @default(now())
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model Career {
+  id              Int              @id @default(autoincrement())
+  careerName      String           @unique
+  description     String?
+  requiredSkills  String[]
+  requiredStream  String?
+  futureScope     String?
+  careerSkills    CareerSkill[]
+  courses         Course[]
+  recommendations Recommendation[]
+}
+
+model Course {
+  id              Int              @id @default(autoincrement())
+  courseName      String           @unique
+  stream          String?
+  duration        String?
+  eligibility     String?
+  careerId        Int?
+  collegeCourses  CollegeCourse[]
+  career          Career?          @relation(fields: [careerId], references: [id])
+  courseSkills    CourseSkill[]
+  recommendations Recommendation[]
+}
+
+model College {
+  id              Int              @id @default(autoincrement())
+  collegeName     String
+  location        String?
+  affiliation     String?
+  collegeCourses  CollegeCourse[]
+  recommendations Recommendation[]
+}
+
+model CollegeCourse {
+  id        Int     @id @default(autoincrement())
+  collegeId Int
+  courseId  Int
+  college   College @relation(fields: [collegeId], references: [id], onDelete: Cascade)
+  course    Course  @relation(fields: [courseId], references: [id], onDelete: Cascade)
+
+  @@unique([collegeId, courseId])
+}
+
+model Skill {
+  id           Int           @id @default(autoincrement())
+  skillName    String        @unique
+  careerSkills CareerSkill[]
+  courseSkills CourseSkill[]
+}
+
+model CareerSkill {
+  id       Int    @id @default(autoincrement())
+  careerId Int
+  skillId  Int
+  career   Career @relation(fields: [careerId], references: [id], onDelete: Cascade)
+  skill    Skill  @relation(fields: [skillId], references: [id], onDelete: Cascade)
+
+  @@unique([careerId, skillId])
+}
+
+model CourseSkill {
+  id       Int    @id @default(autoincrement())
+  courseId Int
+  skillId  Int
+  course   Course @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  skill    Skill  @relation(fields: [skillId], references: [id], onDelete: Cascade)
+
+  @@unique([courseId, skillId])
+}
+
+model Recommendation {
+  id            Int      @id @default(autoincrement())
+  userId        Int
+  careerId      Int?
+  courseId      Int?
+  collegeId     Int?
+  score         Float?
+  reason        String?
+  recommendedAt DateTime @default(now())
+  career        Career?  @relation(fields: [careerId], references: [id])
+  college       College? @relation(fields: [collegeId], references: [id])
+  course        Course?  @relation(fields: [courseId], references: [id])
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
