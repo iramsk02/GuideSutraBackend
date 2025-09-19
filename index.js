@@ -984,11 +984,12 @@ app.get("/users/me", async (req, res) => {
 
 app.post("/assessments", async (req, res) => {
   try {
-    const { userId, testType, score, strengths, weaknesses, stream } = req.body;
+     
+    const { userId,  score, strengths, weaknesses, stream } = req.body;
     if (!userId) return res.status(400).json({ error: "userId is required" });
 
     const assessment = await prisma.assessment.create({
-      data: { userId: Number(userId), testType, score, strengths, weaknesses, stream },
+      data: { userId: Number(userId), score, strengths, weaknesses, stream },
     });
 
     // Create a recommendation based on score (example logic)
@@ -1161,33 +1162,250 @@ app.get("/recommendations/:userId", async (req, res) => {
 });
 
 // Generate recommendations dynamically
+// Generate recommendations dynamically based on assessment + interests
+// app.get("/generate-recommendations/:userId", async (req, res) => {
+//   const { userId } = req.params;
+
+//   try {
+//     // Fetch user data along with assessments
+//     const user = await prisma.user.findUnique({
+//       where: { id: Number(userId) },
+//       include: { assessments: true },
+//     });
+
+//     if (!user) return res.status(404).json({ error: "User not found" });
+
+//     // Use the latest assessment if exists
+//     const latestAssessment = user.assessments.length
+//       ? user.assessments[user.assessments.length - 1]
+//       : null;
+
+//     // Fetch all careers with their skills and related courses
+//     const careers = await prisma.career.findMany({
+//       include: { careerSkills: { include: { skill: true } }, courses: true },
+//     });
+
+//     const recommendations = careers.map((career) => {
+//       // 1️⃣ Stream match (based on assessment or education level)
+//       let streamMatch = 0;
+//       const careerStream = career.requiredStream || "";
+//       const userStream = latestAssessment?.stream || user.educationLevel || "";
+//       if (careerStream && userStream && careerStream.toLowerCase() === userStream.toLowerCase()) {
+//         streamMatch = 1;
+//       }
+
+//       // 2️⃣ Skill match
+//       const careerSkillNames = career.careerSkills.map((cs) => cs.skill.skillName);
+//       const matchedSkills = user.skills.filter((s) => careerSkillNames.includes(s));
+//       const skillScore = matchedSkills.length / (careerSkillNames.length || 1);
+
+//       // 3️⃣ Interest match
+//       let interestScore = 0;
+//       if (user.interests && user.interests.length > 0) {
+//         const interestMatches = user.interests.filter(
+//           (i) => i && career.careerName.toLowerCase().includes(i.toLowerCase())
+//         );
+//         interestScore = interestMatches.length > 0 ? 1 : 0;
+//       }
+
+//       // 4️⃣ Assessment score influence (normalized to 0-1)
+//       const assessmentScore = latestAssessment?.score ? latestAssessment.score / 100 : 0;
+
+//       // 5️⃣ Weighted total score
+//       const totalScore = Math.round(
+//         (streamMatch * 0.25 + skillScore * 0.4 + interestScore * 0.15 + assessmentScore * 0.2) * 100
+//       );
+
+//       return {
+//         careerId: career.id,
+//         careerName: career.careerName,
+//         matchedSkills,
+//         score: totalScore,
+//         reason: `Stream match: ${streamMatch}, Skills match: ${matchedSkills.length}/${careerSkillNames.length}, Interests match: ${interestScore}, Assessment: ${assessmentScore}`,
+//       };
+//     });
+
+//     // Sort recommendations by score descending
+//     recommendations.sort((a, b) => b.score - a.score);
+
+//     res.json({ user: user.name, recommendations });
+//   } catch (error) {
+//     console.error(error);
+//     res.status(500).json({ error: error.message });
+//   }
+// });
+
 app.get("/generate-recommendations/:userId", async (req, res) => {
   const { userId } = req.params;
+
   try {
-    const user = await prisma.user.findUnique({ where: { id: Number(userId) }, include: { assessments: true } });
-    if (!user) return res.status(404).json({ error: "User not found" });
+    // 1. Fetch user data along with their assessments
+    const user = await prisma.user.findUnique({
+      where: { id: Number(userId) },
+      include: { assessments: true },
+    });
 
-    const careers = await prisma.career.findMany({ include: { careerSkills: { include: { skill: true } }, courses: true } });
-    const recommendations = [];
-
-    for (const career of careers) {
-      let streamMatch = 0;
-      if (career.requiredStream && user.educationLevel && career.requiredStream === user.educationLevel) streamMatch = 1;
-
-      const careerSkillNames = career.careerSkills.map(cs => cs.skill.skillName);
-      const matchedSkills = user.skills.filter(s => careerSkillNames.includes(s));
-      const skillScore = matchedSkills.length / (careerSkillNames.length || 1);
-
-      const interestScore = user.interests.filter(i => i && career.careerName.toLowerCase().includes(i.toLowerCase())).length > 0 ? 1 : 0;
-      const score = Math.round((streamMatch * 0.3 + skillScore * 0.5 + interestScore * 0.2) * 100);
-
-      recommendations.push({ careerId: career.id, score, matchedSkills, careerName: career.careerName });
+    if (!user) {
+      return res.status(404).json({ error: "User not found" });
     }
 
-    recommendations.sort((a, b) => b.score - a.score);
-    res.json({ user: user.name, recommendations });
+    const latestAssessment = user.assessments.length
+      ? user.assessments[user.assessments.length - 1]
+      : null;
+
+    // 2. Fetch all data needed for recommendations
+    const allCareers = await prisma.career.findMany({
+      include: { careerSkills: { include: { skill: true } } },
+    });
+    const allCourses = await prisma.course.findMany({
+      include: { courseSkills: { include: { skill: true } }, collegeCourses: { include: { college: true } } },
+    });
+    const allColleges = await prisma.college.findMany({
+      include: { collegeCourses: true }
+    });
+
+    // --- Recommendation Algorithm ---
+
+    // A. Generate and save Career Recommendations
+    const careerRecommendations = allCareers.map((career) => {
+      // Stream match (based on assessment or education level)
+      let streamMatch = 0;
+      const careerStream = career.requiredStream || "";
+      const userStream = latestAssessment?.stream || user.educationLevel || "";
+      if (careerStream && userStream && careerStream.toLowerCase() === userStream.toLowerCase()) {
+        streamMatch = 1;
+      }
+
+      // Skill match
+      const careerSkillNames = career.careerSkills.map((cs) => cs.skill.skillName);
+      const matchedSkills = user.skills.filter((s) => careerSkillNames.includes(s));
+      const skillScore = matchedSkills.length / (careerSkillNames.length || 1);
+
+      // Interest match
+      let interestScore = 0;
+      if (user.interests && user.interests.length > 0) {
+        const interestMatches = user.interests.filter(
+          (i) => i && career.careerName.toLowerCase().includes(i.toLowerCase())
+        );
+        interestScore = interestMatches.length > 0 ? 1 : 0;
+      }
+
+      // Assessment score influence
+      const assessmentScore = latestAssessment?.score ? latestAssessment.score / 100 : 0;
+
+      // Weighted total score
+      const totalScore = Math.round(
+        (streamMatch * 0.25 + skillScore * 0.4 + interestScore * 0.15 + assessmentScore * 0.2) * 100
+      );
+
+      return {
+        careerId: career.id,
+        score: totalScore,
+        reason: `Stream match: ${streamMatch}, Skills match: ${matchedSkills.length}/${careerSkillNames.length}, Interests match: ${interestScore}, Assessment: ${assessmentScore}`,
+      };
+    });
+
+    // Sort and take top 5 career recommendations
+    const topCareers = careerRecommendations.sort((a, b) => b.score - a.score).slice(0, 5);
+    
+    // B. Generate and save Course Recommendations
+    const courseRecommendations = allCourses.map((course) => {
+      // 1️⃣ Stream match
+      let streamMatch = 0;
+      if (course.stream && latestAssessment?.stream && course.stream.toLowerCase() === latestAssessment.stream.toLowerCase()) {
+        streamMatch = 1;
+      }
+
+      // 2️⃣ Skill match
+      const courseSkillNames = course.courseSkills.map((cs) => cs.skill.skillName);
+      const matchedSkills = user.skills.filter((s) => courseSkillNames.includes(s));
+      const skillScore = matchedSkills.length / (courseSkillNames.length || 1);
+      
+      // 3️⃣ Career match (if course is related to a top-recommended career)
+      const careerMatch = topCareers.some(c => c.careerId === course.careerId) ? 1 : 0;
+
+      // Weighted total score for courses
+      const totalScore = Math.round(
+        (streamMatch * 0.4 + skillScore * 0.4 + careerMatch * 0.2) * 100
+      );
+
+      return {
+        courseId: course.id,
+        score: totalScore,
+        reason: `Stream match: ${streamMatch}, Skills match: ${matchedSkills.length}/${courseSkillNames.length}, Career match: ${careerMatch}`,
+      };
+    });
+
+    // Sort and take top 5 course recommendations
+    const topCourses = courseRecommendations.sort((a, b) => b.score - a.score).slice(0, 5);
+    
+    // C. Generate and save College Recommendations
+    const collegeRecommendations = allColleges.map((college) => {
+      // 1️⃣ Course match (if college offers a top-recommended course)
+      const courseMatch = topCourses.some(tc => college.collegeCourses.some(cc => cc.courseId === tc.courseId)) ? 1 : 0;
+      
+      // 2️⃣ Location match
+      const locationMatch = (user.location && college.location && user.location.toLowerCase() === college.location.toLowerCase()) ? 1 : 0;
+      
+      // Weighted total score for colleges
+      const totalScore = Math.round(
+        (courseMatch * 0.8 + locationMatch * 0.2) * 100
+      );
+
+      return {
+        collegeId: college.id,
+        score: totalScore,
+        reason: `Course match: ${courseMatch}, Location match: ${locationMatch}`,
+      };
+    });
+
+    // Sort and take top 5 college recommendations
+    const topColleges = collegeRecommendations.sort((a, b) => b.score - a.score).slice(0, 5);
+
+    // --- Save Recommendations to Database ---
+    
+    // Delete any existing recommendations for the user to avoid duplicates on re-generation
+    await prisma.recommendation.deleteMany({ where: { userId: Number(userId) } });
+
+    // Create new records for top careers, courses, and colleges
+    const allRecommendationsToSave = [
+      ...topCareers.map(rec => ({ userId: Number(userId), careerId: rec.careerId, score: rec.score, reason: rec.reason })),
+      ...topCourses.map(rec => ({ userId: Number(userId), courseId: rec.courseId, score: rec.score, reason: rec.reason })),
+      ...topColleges.map(rec => ({ userId: Number(userId), collegeId: rec.collegeId, score: rec.score, reason: rec.reason })),
+    ];
+    
+    await prisma.recommendation.createMany({
+      data: allRecommendationsToSave,
+    });
+
+    // 3. Fetch all recommendations for the user with full details for the response
+    const finalRecommendations = await prisma.recommendation.findMany({
+      where: { userId: Number(userId) },
+      include: {
+        career: true,
+        course: { include: { collegeCourses: { include: { college: true } } } },
+        college: true,
+      },
+    });
+
+    // 4. Organize and return the final response
+    const responseData = {
+      userId: user.id,
+      name: user.name,
+      careerRecommendations: finalRecommendations
+        .filter(r => r.careerId !== null)
+        .map(r => ({ ...r.career, score: r.score, reason: r.reason })),
+      courseRecommendations: finalRecommendations
+        .filter(r => r.courseId !== null)
+        .map(r => ({ ...r.course, score: r.score, reason: r.reason, recommendedColleges: r.course.collegeCourses.map(cc => cc.college.collegeName) })),
+      collegeRecommendations: finalRecommendations
+        .filter(r => r.collegeId !== null)
+        .map(r => ({ ...r.college, score: r.score, reason: r.reason })),
+    };
+
+    res.json(responseData);
   } catch (error) {
-    console.error(error);
+    console.error("Error generating recommendations:", error);
     res.status(500).json({ error: error.message });
   }
 });
