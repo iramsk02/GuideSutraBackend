@@ -927,6 +927,7 @@ app.post("/signup", async (req, res) => {
 app.post("/signin", async (req, res) => {
   try {
     const { email } = req.body;
+    console.log("hiiiiiiiiii");
     if (!email) return res.status(400).json({ error: "Email is required" });
 
     const user = await prisma.user.findUnique({ where: { email } });
